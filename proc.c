@@ -7,9 +7,15 @@
 #include "proc.h"
 #include "spinlock.h"
 
+struct queue {
+  struct proc *head;
+  struct proc *last;
+};
+
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
+  struct queue pqueue[PPRIORITY];
 } ptable;
 
 static struct proc *initproc;
@@ -19,6 +25,95 @@ extern void forkret(void);
 extern void trapret(void);
 
 static void wakeup1(void *chan);
+
+void
+enqueue(struct proc *proc)
+{
+  proc->next = 0;
+  if (ptable.pqueue[proc->priority].head == 0){
+    ptable.pqueue[proc->priority].head = proc;
+    proc->prev = 0;
+  }
+  else{
+    proc->prev = ptable.pqueue[proc->priority].last;
+    ptable.pqueue[proc->priority].last->next = proc;
+  }
+  ptable.pqueue[proc->priority].last = proc;
+}
+
+struct proc*
+dequeue(void)
+{
+  struct proc *p;
+  int i;
+  for (i = 0; i < PPRIORITY; i++){
+    if (ptable.pqueue[i].head != 0){
+      p = ptable.pqueue[i].head;
+      ptable.pqueue[i].head = p->next;
+      p->next = 0;
+      if (ptable.pqueue[i].head == 0)
+        ptable.pqueue[i].last = 0;
+      return p;
+    }
+  }
+  return 0;
+}
+
+void
+set_priority(struct proc* p, int priority)
+{
+  if ((priority >= 0) && (priority < PPRIORITY))
+    p->priority = priority;
+}
+
+void
+inc_priority(struct proc* p)
+{
+  if (p->priority > 0)
+    p->priority = p->priority - 1;
+}
+
+void
+dec_priority(struct proc* p)
+{
+  if (p->priority < PPRIORITY-1)
+    p->priority = p->priority + 1;
+}
+
+void
+aging_policy(void)
+{
+  // cprintf("Aging Policy\n");
+  for(int i=1; i<PPRIORITY; i++){
+    struct proc *index = ptable.pqueue[i].head;
+    struct proc *p;
+    struct proc *prev;
+    struct proc *next;
+    while (index != 0){
+      p = index;
+      if ((ticks - p->waiting) > PMAXAGE){
+        // cprintf("%d process %s %d %d %d\n", p->pid, p->name, p->priority, (ticks - p->waiting), ticks);
+        prev = p->prev;
+        next = p->next;
+        set_priority(p, 0);
+        enqueue(p);
+        if (prev)
+          prev->next = next;
+        else
+          ptable.pqueue[i].head = next;
+
+        if (next)
+          next->prev = prev;
+        else
+          ptable.pqueue[i].last = prev;
+        index = next;
+      }
+      else{
+        index = index->next;
+      }
+    }
+  }
+}
 
 void
 pinit(void)
@@ -88,6 +183,7 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  p->priority = 0;
 
   release(&ptable.lock);
 
@@ -149,6 +245,8 @@ userinit(void)
   acquire(&ptable.lock);
 
   p->state = RUNNABLE;
+  p->waiting = ticks;
+  enqueue(p);
 
   release(&ptable.lock);
 }
@@ -215,6 +313,9 @@ fork(void)
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
+  np->waiting = ticks;
+  np->priority = 0;
+  enqueue(np);
 
   release(&ptable.lock);
 
@@ -332,16 +433,16 @@ scheduler(void)
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if ((p = dequeue()) != 0){
       if(p->state != RUNNABLE)
-        continue;
-
+        panic("Scheduler panic, invalid state");
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
       c->proc = p;
       switchuvm(p);
       p->state = RUNNING;
+      p->ticks = 0;
 
       swtch(&(c->scheduler), p->context);
       switchkvm();
@@ -350,8 +451,11 @@ scheduler(void)
       // It should have changed its p->state before coming back.
       c->proc = 0;
     }
-    release(&ptable.lock);
 
+    if (!(ticks % AGEPOLICY)){
+      aging_policy();
+    }
+    release(&ptable.lock);
   }
 }
 
@@ -387,6 +491,9 @@ yield(void)
 {
   acquire(&ptable.lock);  //DOC: yieldlock
   myproc()->state = RUNNABLE;
+  myproc()->waiting = ticks;
+  dec_priority(myproc());
+  enqueue(myproc());
   sched();
   release(&ptable.lock);
 }
@@ -460,8 +567,12 @@ wakeup1(void *chan)
   struct proc *p;
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-    if(p->state == SLEEPING && p->chan == chan)
+    if(p->state == SLEEPING && p->chan == chan){
       p->state = RUNNABLE;
+      p->waiting = ticks;
+      inc_priority(p);
+      enqueue(p);
+    }
 }
 
 // Wake up all processes sleeping on chan.
@@ -486,8 +597,12 @@ kill(int pid)
     if(p->pid == pid){
       p->killed = 1;
       // Wake process from sleep if necessary.
-      if(p->state == SLEEPING)
+      if(p->state == SLEEPING){
         p->state = RUNNABLE;
+        p->waiting = ticks;
+        set_priority(p, 0);
+        enqueue(p);
+      }
       release(&ptable.lock);
       return 0;
     }
@@ -523,7 +638,7 @@ procdump(void)
       state = states[p->state];
     else
       state = "???";
-    cprintf("%d %s %s", p->pid, state, p->name);
+    cprintf("PID: %d | STATE: %s | PNAME: %s | PRIOR: %d | WAITING: %d | TICKS: %d", p->pid, state, p->name, p->priority, ticks - p->waiting, ticks);
     if(p->state == SLEEPING){
       getcallerpcs((uint*)p->context->ebp+2, pc);
       for(i=0; i<10 && pc[i] != 0; i++)

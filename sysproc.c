@@ -77,6 +77,17 @@ sys_sleep(void)
   return 0;
 }
 
+int
+sys_set_priority(void)
+{
+  int n;
+  if((argint(0, &n) < 0) || (argint(0, &n) > (PPRIORITY-1)))
+    return -1;
+  else
+    myproc()->priority = n;
+  return 0;
+}
+
 // return how many clock tick interrupts have occurred
 // since start.
 int
