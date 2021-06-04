@@ -89,3 +89,38 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+int
+sys_semget(void)
+{
+  int semid, init_value;
+  if( argint(1, &init_value) < 0 || argint(0, &semid) < 0)
+    return -1;
+  return semget(semid, init_value);
+}
+
+int 
+sys_semclose(void)
+{
+  int semid;
+  if(argint(0, &semid) < 0)
+    return -1;
+  return semclose(semid);
+}
+int 
+sys_semdown(void)
+{
+  int semid;
+  if(argint(0, &semid) < 0)
+    return -1;
+  return semdown(semid);
+}
+
+int 
+sys_semup(void)
+{
+  int semid;
+  if(argint(0, &semid) < 0)
+    return -1;
+  return semup(semid);
+}

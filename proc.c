@@ -6,6 +6,7 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
+#include "sem.h"
 
 struct {
   struct spinlock lock;
@@ -229,7 +230,7 @@ exit(void)
 {
   struct proc *curproc = myproc();
   struct proc *p;
-  int fd;
+  int sd, fd;
 
   if(curproc == initproc)
     panic("init exiting");
@@ -239,6 +240,13 @@ exit(void)
     if(curproc->ofile[fd]){
       fileclose(curproc->ofile[fd]);
       curproc->ofile[fd] = 0;
+    }
+  }
+
+  //Delete all semaphores
+  for(sd = 0; sd < NOSEM; sd++){
+    if(curproc->osem[sd]){
+      semclose(curproc->osem[sd] - getstable());
     }
   }
 

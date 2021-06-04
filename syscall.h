@@ -20,3 +20,7 @@
 #define SYS_link   19
 #define SYS_mkdir  20
 #define SYS_close  21
+#define SYS_semget	22
+#define SYS_semclose  23
+#define SYS_semdown	24
+#define SYS_semup  	25
