@@ -13,6 +13,7 @@ struct gatedesc idt[256];
 extern uint vectors[];  // in vectors.S: array of 256 entry pointers
 struct spinlock tickslock;
 uint ticks;
+uint sz;
 
 void
 tvinit(void)
@@ -77,6 +78,21 @@ trap(struct trapframe *tf)
             cpuid(), tf->cs, tf->eip);
     lapiceoi();
     break;
+  case T_PGFLT:
+    // cprintf("pid %d %s: trap %d err %d on cpu %d "
+    //         "eip 0x%x addr 0x%x | pgrable %x\n",
+    //         myproc()->pid, myproc()->name, tf->trapno,
+    //         tf->err, cpuid(), tf->eip, rcr2(), PGROUNDDOWN(rcr2()));
+    sz = PGROUNDDOWN(rcr2());
+    if (myproc() && (tf->cs&3) == DPL_USER){
+      if ( (sz > myproc()->sofpgaddr) && (rcr2() < myproc()->sz) ) {
+        if ( (sz = allocuvm(myproc()->pgdir, sz, sz + PGSIZE)) != 0)
+          break;
+        else
+          cprintf("out of memory\n");
+      }
+      cprintf("stack overflow\n");
+    }
 
   //PAGEBREAK: 13
   default:
