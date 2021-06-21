@@ -25,7 +25,6 @@ struct sem* getstable(){
 }
 
 int semget(int key, int init_value){
-	struct sem *t;
 	struct sem *s;
 	struct sem **r;
 	static int first_time = 1;
@@ -36,41 +35,31 @@ int semget(int key, int init_value){
 	}
 
 	acquire(&stable.lock);
-	if (key == -1) {
-		for (t = stable.sem; t < stable.sem + NSEM; t++)
-			if (t->refcount == 0){
-				s = t;
-				if (*(r = checkosem()) == 0)
-					goto found;
-				release(&stable.lock);
-				return -2;
-			}
-		release(&stable.lock);
-		return -3;
+
+  s = stable.sem + key;
+  if (s->refcount == 0){
+    r = checkosem();
+    if (r != 0){
+      s->value = init_value;
+      s->refcount = 1;
+      *r = s;
+      release(&stable.lock);
+      return s - stable.sem;
+    }
+    release(&stable.lock);
+    return -1;
 	
-	found:
-		s->value = init_value;
-		s->refcount=1;
-		*r = s;
-		release(&stable.lock);
-		return s - stable.sem;	
-	
-	} else {
-		s = stable.sem + key;
-		if (s->refcount == 0){
-			release(&stable.lock);
-			return -1;
-		}else if (*(r = checkosem()) == 0){
-			*r = s;
-			s->refcount++;
-			release(&stable.lock);
-			return key;
-		}	else {
-			release(&stable.lock);
-			return -2;
-		}
-	}
+  }else if (*(r = checkosem()) == 0){
+    *r = s;
+    s->refcount++;
+    release(&stable.lock);
+    return key;
+  }	else {
+    release(&stable.lock);
+    return -1;
+  }
 }
+
 
 int semclose(int semid){
 	struct sem *s;

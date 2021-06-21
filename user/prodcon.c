@@ -3,18 +3,35 @@
 #include "fcntl.h"
 #include "syscall.h"
 
-#define PRODUCERS 4
-#define CONSUMERS 2
-#define BUFF_SIZE 4
+#define PRODUCERS 5
+#define CONSUMERS 5
+#define BUFF_SIZE 50
+#define UPPER 1000000
 #define MAX_IT 5
 #define FILE "buff_file"
-#define NUMSEM 1
-
 
 int buffer;
 int semprod;
 int semcom;
 int sembuff;
+
+uint
+random(void)
+{
+  // Take from http://stackoverflow.com/questions/1167253/implementation-of-rand
+  static unsigned int z1 = 12345, z2 = 12345, z3 = 12345, z4 = 12345;
+  unsigned int b;
+  b  = ((z1 << 6) ^ z1) >> 13;
+  z1 = ((z1 & 4294967294U) << 18) ^ b;
+  b  = ((z2 << 2) ^ z2) >> 27;
+  z2 = ((z2 & 4294967288U) << 2) ^ b;
+  b  = ((z3 << 13) ^ z3) >> 21;
+  z3 = ((z3 & 4294967280U) << 7) ^ b;
+  b  = ((z4 << 3) ^ z4) >> 12;
+  z4 = ((z4 & 4294967168U) << 13) ^ b;
+
+  return (z1 ^ z2 ^ z3 ^ z4) / 2;
+}
 
 void
 initbuffer(int init_val)
@@ -94,13 +111,19 @@ void
 consume()
 {
   printf(1,">> Start Consumer\n");
-  int i,aux;
+  int i,aux, w, j;
   for(i = 0; i < MAX_IT * PRODUCERS; i++){
     printf(1,"consumer obtiene\n");
     semdown(semcom);
     semdown(sembuff);
     readbuffer(&aux);
     aux--;
+
+    w = (random() % UPPER) + 1;
+    printf(1,"## waiting %d\n",w);
+    j = 0;
+    while (j < w)
+      j++;
     writebuffer(&aux);
     readbuffer(&aux);
     printf(1,"<< buffer after consume: %d\n",aux);
@@ -125,27 +148,26 @@ main(void)
   printf(1,"Buffer size: %d\n", BUFF_SIZE);
   // init buffer file
   initbuffer(0);
-    for (i = 0; i < NUMSEM; i++) {
-      // create producer semaphore
-      semprod = semget(-1,BUFF_SIZE); // empty
-      if(semprod < 0){
-        printf(1,"invalid semprod \n");
-        exit();
-    }
-    
-    // create consumer semaphore
-    semcom = semget(-1,0); // full
-    if(semcom < 0){
-      printf(1,"invalid semcom\n");
-      exit();
-    }
-    
-    // create buffer semaphore
-    sembuff = semget(-1,1); // mutex
-    if(sembuff < 0){
-      printf(1,"invalid sembuff\n");
-      exit();
-    }
+
+  // create producer semaphore
+  semprod = semget(0,BUFF_SIZE); // empty
+  if(semprod < 0){
+    printf(1,"invalid semprod \n");
+    exit();
+  }
+
+  // create consumer semaphore
+  semcom = semget(1,0); // full
+  if(semcom < 0){
+    printf(1,"invalid semcom\n");
+    exit();
+  }
+
+  // create buffer semaphore
+  sembuff = semget(2,1); // mutex
+  if(sembuff < 0){
+    printf(1,"invalid sembuff\n");
+    exit();
   }
 
   for (i = 0; i < PRODUCERS; i++) {
