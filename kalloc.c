@@ -21,6 +21,7 @@ struct {
   struct spinlock lock;
   int use_lock;
   struct run *freelist;
+  uint pgrefcount[PHYSTOP >> PTXSHIFT];
 } kmem;
 
 // Initialization happens in two phases.
@@ -48,9 +49,14 @@ freerange(void *vstart, void *vend)
 {
   char *p;
   p = (char*)PGROUNDUP((uint)vstart);
-  for(; p + PGSIZE <= (char*)vend; p += PGSIZE)
+  for(; p + PGSIZE <= (char*)vend; p += PGSIZE){
+    // initialize the page reference count to 0
+    // for page at position = [V2P(p) >> PTXSHIFT]
+    kmem.pgrefcount[V2P(p) >> PTXSHIFT] = 0;
     kfree(p);
+  }
 }
+
 //PAGEBREAK: 21
 // Free the page of physical memory pointed at by v,
 // which normally should have been returned by a
@@ -64,14 +70,21 @@ kfree(char *v)
   if((uint)v % PGSIZE || v < end || V2P(v) >= PHYSTOP)
     panic("kfree");
 
-  // Fill with junk to catch dangling refs.
-  memset(v, 1, PGSIZE);
-
   if(kmem.use_lock)
     acquire(&kmem.lock);
   r = (struct run*)v;
-  r->next = kmem.freelist;
-  kmem.freelist = r;
+
+  // decrease reference count
+  if(kmem.pgrefcount[V2P(v) >> PTXSHIFT] > 0)
+    kmem.pgrefcount[V2P(v) >> PTXSHIFT] -= 1;
+
+  // free page if there are zero references
+  if(kmem.pgrefcount[V2P(v) >> PTXSHIFT] == 0){
+    // Fill with junk to catch dangling refs.
+    memset(v, 1, PGSIZE);
+    r->next = kmem.freelist;
+    kmem.freelist = r;
+  }
   if(kmem.use_lock)
     release(&kmem.lock);
 }
@@ -87,10 +100,34 @@ kalloc(void)
   if(kmem.use_lock)
     acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
+  if(r){
     kmem.freelist = r->next;
+    kmem.pgrefcount[V2P((char*)r) >> PTXSHIFT] += 1;
+  }
   if(kmem.use_lock)
     release(&kmem.lock);
   return (char*)r;
 }
 
+void 
+inc_refpgcount(uint pa){
+  acquire(&kmem.lock);
+  kmem.pgrefcount[pa >> PTXSHIFT] += 1;
+  release(&kmem.lock);
+}
+
+void 
+dec_refpgcount(uint pa){
+  acquire(&kmem.lock);
+  kmem.pgrefcount[pa >> PTXSHIFT] -= 1;
+  release(&kmem.lock);
+}
+
+uint 
+get_refpgcount(uint pa){
+  uint count;
+  acquire(&kmem.lock);
+  count = kmem.pgrefcount[pa >> PTXSHIFT];
+  release(&kmem.lock);
+  return count;
+} 

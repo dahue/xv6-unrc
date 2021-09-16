@@ -36,6 +36,7 @@ idtinit(void)
 void
 trap(struct trapframe *tf)
 {
+  uint va;
   if(tf->trapno == T_SYSCALL){
     if(myproc()->killed)
       exit();
@@ -77,6 +78,15 @@ trap(struct trapframe *tf)
             cpuid(), tf->cs, tf->eip);
     lapiceoi();
     break;
+  case T_PGFLT:
+    va = rcr2();
+    if (myproc() && (tf->cs&3) == DPL_USER){
+      if ( (va < myproc()->sz) ) {
+        cowhandler(va);
+        break;
+      }
+      cprintf("Illegal address %x\n", va);
+    }
 
   //PAGEBREAK: 13
   default:

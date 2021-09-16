@@ -344,6 +344,34 @@ bad:
   return 0;
 }
 
+pde_t*
+copyuvm2(pde_t *pgdir, uint sz)
+{
+  pde_t *d;
+  pte_t *pte;
+  uint pa, i, flags;
+
+  if((d = setupkvm()) == 0)
+    return 0;
+  for(i = 0; i < sz; i += PGSIZE){
+    if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
+      panic("copyuvm2: pte should exist");
+    if(!(*pte & PTE_P))
+      panic("copyuvm2: page not present");
+    *pte = (~ PTE_W) & *pte; // Disable writing in page
+    pa = PTE_ADDR(*pte);
+    flags = PTE_FLAGS(*pte);
+    if(mappages(d, (void*)i, PGSIZE, pa, flags) < 0) {
+      freevm(d);
+      lcr3(V2P(pgdir));
+      return 0;
+    }
+    inc_refpgcount(pa);
+  }
+  lcr3(V2P(pgdir));   // reload cr3 (Translation Look-aside Buffer)
+  return d;
+}
+
 //PAGEBREAK!
 // Map user virtual address to kernel address.
 char*
@@ -392,3 +420,41 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
 //PAGEBREAK!
 // Blank page.
 
+void 
+cowhandler(uint va){
+  pte_t *pte;
+  uint pa, refpgcount, flags;
+  char* mem;
+
+  pte = walkpgdir(myproc()->pgdir, (void*)va, 0);
+  pa = PTE_ADDR(*pte);
+  refpgcount = get_refpgcount(pa);
+
+  if(refpgcount < 1) {
+    panic("cowhandler error: invalid reference count\n");
+  }
+  else if(refpgcount == 1) {
+    // make page writable
+    *pte = PTE_W | *pte;
+    
+    lcr3(V2P(myproc()->pgdir));
+    return;
+  }
+  else {
+    if((mem = kalloc()) == 0) { // out of memory
+      myproc()->killed = 1;
+      cprintf("cowhandler error: out of memory\n");          
+      return;
+    }
+    memmove(mem, (char*)P2V(pa), PGSIZE);
+
+    // point the PTE to new page
+    flags = PTE_FLAGS(*pte) | PTE_W;
+    *pte =  V2P(mem) | flags;
+    dec_refpgcount(pa);
+
+    lcr3(V2P(myproc()->pgdir));
+    return;
+  }
+  lcr3(V2P(myproc()->pgdir));
+}

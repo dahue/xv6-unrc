@@ -180,7 +180,7 @@ growproc(int n)
 int
 fork(void)
 {
-  int i, pid;
+  int i, pid, cond;
   struct proc *np;
   struct proc *curproc = myproc();
 
@@ -190,7 +190,11 @@ fork(void)
   }
 
   // Copy process state from proc.
-  if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
+  if (strncmp(curproc->name, "init", sizeof(curproc->name)) == 0)
+    cond = (np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0;
+  else
+    cond = (np->pgdir = copyuvm2(curproc->pgdir, curproc->sz)) == 0;
+  if(cond){
     kfree(np->kstack);
     np->kstack = 0;
     np->state = UNUSED;
