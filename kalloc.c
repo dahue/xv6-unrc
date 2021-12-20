@@ -102,7 +102,7 @@ kalloc(void)
   r = kmem.freelist;
   if(r){
     kmem.freelist = r->next;
-    kmem.pgrefcount[V2P((char*)r) >> PTXSHIFT] += 1;
+    kmem.pgrefcount[V2P((char*)r) >> PTXSHIFT] = 1;
   }
   if(kmem.use_lock)
     release(&kmem.lock);

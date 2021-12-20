@@ -8,6 +8,8 @@
 #include "traps.h"
 #include "spinlock.h"
 
+extern pte_t*  walkpgdir(pde_t *pgdir, const void *va, int alloc);
+
 // Interrupt descriptor table (shared by all CPUs).
 struct gatedesc idt[256];
 extern uint vectors[];  // in vectors.S: array of 256 entry pointers
@@ -81,7 +83,9 @@ trap(struct trapframe *tf)
   case T_PGFLT:
     va = rcr2();
     if (myproc() && (tf->cs&3) == DPL_USER){
-      if ( (va < myproc()->sz) ) {
+      pte_t * pte = walkpgdir(myproc()->pgdir, (char*)PGROUNDDOWN(va), 0);
+      if ( (va < myproc()->sz) && (*pte & PTE_P) && ((*pte & PTE_W) == 0) ) {
+        // cprintf("pid %d %s, Page Fault at: 0x%x.\n", myproc()->pid, myproc()->name, va);
         cowhandler(va);
         break;
       }
